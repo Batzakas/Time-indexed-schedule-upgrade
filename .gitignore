@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+
+# Virtual environment (managed by uv; uv.lock IS tracked for reproducible installs)
+.venv/
+
+# Gurobi (license contains credentials; IIS files are per-run debugging output)
+gurobi.lic
+*.ilp
+
+# Regenerable project data/results
+data/instances/
+results/partial_results/
+results/aggregated/
+results/infeasible/
+src/logs/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
