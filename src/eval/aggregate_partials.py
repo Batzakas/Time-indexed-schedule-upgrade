@@ -72,6 +72,13 @@ def summarize(groups: Dict[GROUP_KEY, List[dict]]) -> List[dict]:
         gaps = [r["mip_gap"] for r in feasible if r.get("mip_gap") is not None]
         gap_mean, gap_ci = _mean_ci95(gaps)
 
+        # Which instance file(s)/seed(s) this row summarizes -- in practice
+        # almost always exactly one, since Hmax (part of the group key) is
+        # itself derived from a per-seed random draw of L_e, so seeds rarely
+        # collide into the same group. Kept explicit rather than hidden so a
+        # reader can trace any row back to its data/instances/<name>.json.
+        instance_names = "|".join(sorted({r.get("instance_name", "?") for r in recs}))
+
         rows.append({
             "graph_type": graph_type,
             "n_nodes": n_nodes,
@@ -79,6 +86,7 @@ def summarize(groups: Dict[GROUP_KEY, List[dict]]) -> List[dict]:
             "M": M,
             "Hmax": hmax,
             "n_samples": n,
+            "instance_names": instance_names,
             "feasible_rate": feasible_rate,
             "makespan_mean": makespan_mean,
             "makespan_ci95": makespan_ci,

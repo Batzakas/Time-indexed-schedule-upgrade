@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 import random
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -38,7 +38,9 @@ class Instance:
     commodities: List[Commodity]
     Hmax: int
     M: float
-    initial_routing: Dict[int, List[int]] 
+    initial_routing: Dict[int, List[int]]
+    upgrade_types: Dict[int, str] = field(default_factory=dict)   
+    link_length_km: Dict[int, float] = field(default_factory=dict) 
 
     def capacity_before(self, edge_id: int) -> float:
         """Capacity of edge_id at h=0, i.e. u0_e if upgradeable, u_fixed otherwise."""
@@ -62,6 +64,8 @@ class Instance:
         d["u_fixed"] = {str(k): v for k, v in self.u_fixed.items()}
         d["L"] = {str(k): v for k, v in self.L.items()}
         d["initial_routing"] = {str(k): v for k, v in self.initial_routing.items()}
+        d["upgrade_types"] = {str(k): v for k, v in self.upgrade_types.items()}
+        d["link_length_km"] = {str(k): v for k, v in self.link_length_km.items()}
         return d
 
     @staticmethod
@@ -81,6 +85,8 @@ class Instance:
             Hmax=d["Hmax"],
             M=d["M"],
             initial_routing={int(k): v for k, v in d["initial_routing"].items()},
+            upgrade_types={int(k): v for k, v in d.get("upgrade_types", {}).items()},
+            link_length_km={int(k): v for k, v in d.get("link_length_km", {}).items()},
         )
 
 

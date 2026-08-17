@@ -16,6 +16,7 @@ data/instances/
 results/partial_results/
 results/aggregated/
 results/infeasible/
+results/figures/
 src/logs/
 
 # Editors / OS
