@@ -29,18 +29,6 @@ python -m src.eval.aggregate_partials --partial-dir results/partial_results \
     --out-csv results/aggregated/summary.csv
 ```
 
-### Real topologies
-
-Instead of synthetic graphs, instances can be built from the same topology
-files used by `Network_Planner_Code`'s EON simulator (`test5`: 5 nodes/7
-links, `dt12`: 12 nodes/20 links -- copied into `src/data/topologies/`).
-Upgrade duration (`L_e`) and the before/after capacity jump (`u0_e`/`u1_e`)
-are derived from real per-upgrade-type constants in
-`Network_Planner_Code/sim/core/constants.py` (`t_C1`/`t_CL1`/`t_b`/`t_3C`
-days, and fiber/band/core counts), not sampled uniformly at random -- see
-the comment above `UPGRADE_TYPES` in `src/configs/params.py` for exactly
-how each number was derived. Which edges are upgradeable, which node pairs
-communicate, and demand sizes are still randomized per seed.
 
 ```bash
 python -m src.data.real_instance_generator --topology dt12 \
@@ -60,16 +48,6 @@ python -m src.eval.graficos --summary-csv results/aggregated/summary.csv \
 `run_pipeline.sh --topology dt12` (or `test5`) runs all three steps above
 end to end; omit `--topology` (or pass `synthetic`) to keep using the
 random-graph generator.
-
-`--topology dt12` defaults to `--u-fraction 0.5 --n-commodities 10` instead
-of the synthetic/test5 default (`0.3`/`3`) -- a scale sweep (fixing
-`u_fraction` vs `n_commodities` one at a time) found `u_fraction` is what
-actually drives MILP difficulty: at `0.3` dt12 solves in <1s regardless of
-`n_commodities`, at `1.0` it climbs into tens of seconds to minutes (and can
-fail to even find a feasible solution within a few minutes once combined
-with more commodities). `0.5`/`10` sits in the middle: still solves to
-proven optimality in about a second, but exercises a meaningfully larger
-model than the trivial default.
 
 Always invoke with the venv's Python (or an activated venv) -- `runner.py`
 re-launches `model_tester.py` via `sys.executable`, so the same interpreter
