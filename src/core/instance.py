@@ -58,7 +58,6 @@ class Instance:
 
     def to_dict(self) -> dict:
         d = asdict(self)
-        # JSON object keys must be strings; our dict keys are edge/commodity ints.
         d["u0"] = {str(k): v for k, v in self.u0.items()}
         d["u1"] = {str(k): v for k, v in self.u1.items()}
         d["u_fixed"] = {str(k): v for k, v in self.u_fixed.items()}
@@ -103,22 +102,27 @@ def load(path: str | Path) -> Instance:
     return Instance.from_dict(d)
 
 
-# compute_initial_routing greedily assigns each commodity a simple path
-# (shortest first, random order) respecting remaining edge capacity at h=0.
-# Returns None if no feasible joint routing was found; caller should
-# regenerate the instance in that case.
+_MAX_SIMPLE_PATHS = 500 
+_MAX_DFS_STEPS = 200_000  
+
 
 def _simple_paths(adj: Dict[int, List[Tuple[int, int]]], s: int, t: int,
                    max_len: int) -> List[List[int]]:
-    """All simple node-paths from s to t with at most max_len edges (DFS)."""
+    """Up to _MAX_SIMPLE_PATHS simple node-paths from s to t with at most
+    max_len edges (DFS, stops early once either cap is hit)."""
     paths: List[List[int]] = []
     visited = {s}
     path = [s]
+    steps = 0
 
     def dfs(node: int):
-        if len(path) - 1 >= max_len:
+        nonlocal steps
+        steps += 1
+        if steps >= _MAX_DFS_STEPS or len(paths) >= _MAX_SIMPLE_PATHS or len(path) - 1 >= max_len:
             return
         for nxt, _eid in adj[node]:
+            if steps >= _MAX_DFS_STEPS or len(paths) >= _MAX_SIMPLE_PATHS:
+                return
             if nxt in visited:
                 continue
             if nxt == t:
@@ -159,7 +163,7 @@ def compute_initial_routing(
         adj[u].append((v, eid))
         adj[v].append((u, eid))
 
-    max_path_len = max_path_len or n_nodes
+    max_path_len = max_path_len or min(n_nodes, 14)
 
     remaining = {eid: (u0[eid] if eid in U else u_fixed[eid]) for (_, _, eid) in edges}
 

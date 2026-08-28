@@ -40,9 +40,16 @@ python -m src.core.runner --instances "data/instances/dt12_real_*.json" \
 python -m src.eval.aggregate_partials --partial-dir results/partial_results \
     --out-csv results/aggregated/summary.csv
 
-# 5) Render charts (results/figures/tradeoff.png, scalability.png, diagnostics.png)
+# 5) Render charts: network load/feasibility and solver metrics vs M
+#    (results/figures/network_load_all.png, solver_all.png)
 python -m src.eval.graficos --summary-csv results/aggregated/summary.csv \
-    --out-dir results/figures
+    --topology-label all --out-dir results/figures \
+    --x-col M --x-label "M (reroute penalty weight)" --series-col graph_type
+
+# Congestion sweeps (src/eval/congestion_sweep.py) produce a CSV shaped for
+# the same charts' default axes (x=n_commodities, series=u_fraction):
+python -m src.eval.graficos --summary-csv results/aggregated/congestion_dt12.csv \
+    --topology-label dt12 --out-dir results/figures
 ```
 
 `run_pipeline.sh --topology dt12` (or `test5`) runs all three steps above
@@ -70,11 +77,12 @@ batch_milp/
 │   ├── algorithms/milp_makespan.py  # the Gurobi model (run_ilp / solve_ilp)
 │   └── eval/
 │       ├── aggregate_partials.py    # merges partials -> results/aggregated/summary.csv
-│       └── graficos.py              # summary.csv -> results/figures/*.png
+│       ├── congestion_sweep.py      # u_fraction x n_commodities sweep -> congestion_<topology>.csv
+│       └── graficos.py              # summary/congestion csv -> results/figures/{network_load,solver}_<label>.png
 └── results/
     ├── partial_results/<graph_type>_<n_nodes>_<u_pct>/partial_<name>_M<M>_H<Hmax>.json
-    ├── aggregated/summary.csv
-    └── figures/{tradeoff,scalability,diagnostics}.png
+    ├── aggregated/{summary.csv,congestion_<topology>.csv}
+    └── figures/{network_load,solver}_<label>.png
 ```
 
 ## Instance format

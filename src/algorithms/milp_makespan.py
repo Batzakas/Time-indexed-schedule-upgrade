@@ -7,6 +7,7 @@ feasibility (Eqs. 4-6) allows.
 from __future__ import annotations
 
 import os
+import time
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -15,6 +16,13 @@ from gurobipy import GRB
 
 from src.core.instance import Instance
 import src.configs.params as params
+
+
+def _safe_attr(model, name):
+    try:
+        return getattr(model, name)
+    except (AttributeError, gp.GurobiError):
+        return None
 
 
 def _capval(u0: float, u1: float, L: int, tau: int, h: int) -> float:
@@ -35,11 +43,7 @@ def run_ilp(
     mip_gap: Optional[float] = None,
     verbose: bool = False,
 ) -> dict:
-    """Build and solve the makespan MILP for one instance.
-
-    Never raises on infeasibility/time limit -- callers should check
-    result["status"] / result["feasible"].
-    """
+    #Build and solve the makespan MILP for one instance.
     if gurobi_license is not None:
         os.environ["GRB_LICENSE_FILE"] = gurobi_license
     elif os.path.exists(params.DEFAULT_GUROBI_LICENSE):
@@ -60,7 +64,14 @@ def run_ilp(
     if not verbose:
         env.setParam("OutputFlag", 0)
         env.setParam("LogToConsole", 0)
-    env.start()
+    for attempt in range(5):
+        try:
+            env.start()
+            break
+        except gp.GurobiError:
+            if attempt == 4:
+                raise
+            time.sleep(5 * (attempt + 1))
 
     model = gp.Model("batch_upgrade_makespan", env=env)
     if max_memory is not None:
@@ -199,9 +210,32 @@ def run_ilp(
     reroute_term = gp.quicksum(a[k, h] for k in range(n_k) for h in range(1, Hmax))
     model.setObjective(C + M * reroute_term, GRB.MINIMIZE)  # Eq. (13)
 
-    model.optimize()
+    try:
+        model.optimize()
+    except gp.GurobiError as exc:
+        return {
+            "status": None,
+            "runtime": None,
+            "node_count": None,
+            "num_vars": model.NumVars,
+            "num_bin_vars": model.NumBinVars,
+            "num_constrs": model.NumConstrs,
+            "mip_gap": None,
+            "obj_bound": _safe_attr(model, "ObjBound"),
+            "sol_count": _safe_attr(model, "SolCount"),
+            "work": _safe_attr(model, "Work"),
+            "iter_count": _safe_attr(model, "IterCount"),
+            "bar_iter_count": _safe_attr(model, "BarIterCount"),
+            "mem_used": _safe_attr(model, "MemUsed"),
+            "max_mem_used": _safe_attr(model, "MaxMemUsed"),
+            "feasible": False,
+            "error": str(exc),
+        }
 
-    return _extract_result(model, instance, Hmax, K, y, valid_taus, a, C)
+    return _extract_result(
+        model, instance, Hmax, K, y, valid_taus, a, C,
+        f=f, arcs_of_edge=arcs_of_edge, edge_ids=edge_ids, U_set=U_set,
+    )
 
 
 def _edge_path_to_nodes(instance: Instance, start: int, edge_path: List[int]) -> List[int]:
@@ -218,7 +252,44 @@ def _edge_path_to_nodes(instance: Instance, start: int, edge_path: List[int]) ->
     return nodes
 
 
-def _extract_result(model, instance, Hmax, K, y, valid_taus, a, C) -> dict:
+def _network_load(model, instance, Hmax, K, f, arcs_of_edge, edge_ids, U_set, start_time) -> dict:
+    #utilization = demand routed / capacity available,
+    
+    utilization: Dict[int, Dict[int, Optional[float]]] = {}
+    values: List[float] = []
+    bottleneck_edge, bottleneck_h, bottleneck_val = None, None, 0.0
+
+    for e in edge_ids:
+        utilization[e] = {}
+        for h in range(Hmax):
+            if e in U_set:
+                cap = _capval(instance.u0[e], instance.u1[e], instance.L[e], start_time[e], h)
+            else:
+                cap = instance.u_fixed[e]
+            if cap <= 0:
+                utilization[e][h] = None
+                continue
+            used = sum(
+                c.d * sum(f[k, idx, h].X for idx in arcs_of_edge[e])
+                for k, c in enumerate(K)
+            )
+            u_val = used / cap
+            utilization[e][h] = u_val
+            values.append(u_val)
+            if u_val > bottleneck_val:
+                bottleneck_edge, bottleneck_h, bottleneck_val = e, h, u_val
+
+    return {
+        "utilization": utilization,
+        "network_load_max": bottleneck_val,
+        "network_load_max_edge": bottleneck_edge,
+        "network_load_max_h": bottleneck_h,
+        "network_load_mean": (sum(values) / len(values)) if values else 0.0,
+    }
+
+
+def _extract_result(model, instance, Hmax, K, y, valid_taus, a, C,
+                     f=None, arcs_of_edge=None, edge_ids=None, U_set=None) -> dict:
     metrics = {
         "status": model.Status,
         "runtime": model.Runtime,
@@ -227,6 +298,13 @@ def _extract_result(model, instance, Hmax, K, y, valid_taus, a, C) -> dict:
         "num_bin_vars": model.NumBinVars,
         "num_constrs": model.NumConstrs,
         "mip_gap": model.MIPGap if model.SolCount > 0 else None,
+        "obj_bound": _safe_attr(model, "ObjBound"),
+        "sol_count": model.SolCount,
+        "work": _safe_attr(model, "Work"),
+        "iter_count": _safe_attr(model, "IterCount"),
+        "bar_iter_count": _safe_attr(model, "BarIterCount"),
+        "mem_used": _safe_attr(model, "MemUsed"),
+        "max_mem_used": _safe_attr(model, "MaxMemUsed"),
     }
 
     if model.Status == GRB.INFEASIBLE:
@@ -264,6 +342,8 @@ def _extract_result(model, instance, Hmax, K, y, valid_taus, a, C) -> dict:
         "total_reroutes": int(sum(reroute_by_commodity)),
         "reroutes_by_commodity": reroute_by_commodity,
     })
+    if f is not None:
+        metrics.update(_network_load(model, instance, Hmax, K, f, arcs_of_edge, edge_ids, U_set, start_time))
     return metrics
 
 

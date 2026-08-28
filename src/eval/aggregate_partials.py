@@ -57,6 +57,14 @@ def group_records(records: List[dict]) -> Dict[GROUP_KEY, List[dict]]:
     return groups
 
 
+def _col(recs: List[dict], name: str, source: List[dict] | None = None) -> Tuple[float, float]:
+    """mean+CI95 of `name` over `source` (defaults to `recs`), skipping records
+    where the field is absent -- lets fields added mid-experiment (e.g.
+    num_constrs) coexist with older partials that predate them."""
+    source = recs if source is None else source
+    return _mean_ci95([r[name] for r in source if r.get(name) is not None])
+
+
 def summarize(groups: Dict[GROUP_KEY, List[dict]]) -> List[dict]:
     rows = []
     for (graph_type, n_nodes, n_upg, M, hmax), recs in sorted(groups.items()):
@@ -68,21 +76,39 @@ def summarize(groups: Dict[GROUP_KEY, List[dict]]) -> List[dict]:
         obj_mean, obj_ci = _mean_ci95([r["objective"] for r in feasible])
         batches_mean, batches_ci = _mean_ci95([r["n_batches_emergent"] for r in feasible])
         reroutes_mean, reroutes_ci = _mean_ci95([r["total_reroutes"] for r in feasible])
-        runtime_mean, runtime_ci = _mean_ci95([r["runtime"] for r in recs])
+        runtime_mean, runtime_ci = _col(recs, "runtime")
         gaps = [r["mip_gap"] for r in feasible if r.get("mip_gap") is not None]
         gap_mean, gap_ci = _mean_ci95(gaps)
 
-        # Which instance file(s)/seed(s) this row summarizes -- in practice
-        # almost always exactly one, since Hmax (part of the group key) is
-        # itself derived from a per-seed random draw of L_e, so seeds rarely
-        # collide into the same group. Kept explicit rather than hidden so a
-        # reader can trace any row back to its data/instances/<name>.json.
+        # absent on partials generated before network_load_* existed (see _network_load in milp_makespan.py)
+        bottleneck_vals = [r["network_load_max"] for r in feasible if r.get("network_load_max") is not None]
+        bottleneck_mean, bottleneck_ci = _mean_ci95(bottleneck_vals)
+        avg_util_vals = [r["network_load_mean"] for r in feasible if r.get("network_load_mean") is not None]
+        avg_util_mean, avg_util_ci = _mean_ci95(avg_util_vals)
+
+        # model-size fields are present on every record regardless of feasibility
+        node_count_mean, node_count_ci = _col(recs, "node_count")
+        num_constrs_mean, num_constrs_ci = _col(recs, "num_constrs")
+        num_vars_mean, num_vars_ci = _col(recs, "num_vars")
+
+        # n_edges/n_commodities are constant within a group (same graph_type/
+        # n_nodes/n_upgradeable/M/Hmax scenario), so any record's value works;
+        # u_fraction is derived rather than stored directly on partials.
+        n_edges = int(recs[0].get("n_edges") or 0)
+        n_commodities = int(recs[0].get("n_commodities") or 0)
+        u_fraction = (n_upg / n_edges) if n_edges else float("nan")
+
+        # usually one seed per row: Hmax (in the group key) depends on each
+        # seed's random L_e draw, so seeds rarely land in the same group
         instance_names = "|".join(sorted({r.get("instance_name", "?") for r in recs}))
 
         rows.append({
             "graph_type": graph_type,
             "n_nodes": n_nodes,
+            "n_edges": n_edges,
             "n_upgradeable": n_upg,
+            "u_fraction": u_fraction,
+            "n_commodities": n_commodities,
             "M": M,
             "Hmax": hmax,
             "n_samples": n,
@@ -100,6 +126,16 @@ def summarize(groups: Dict[GROUP_KEY, List[dict]]) -> List[dict]:
             "runtime_ci95": runtime_ci,
             "mip_gap_mean": gap_mean,
             "mip_gap_ci95": gap_ci,
+            "bottleneck_util_mean": bottleneck_mean,
+            "bottleneck_util_ci95": bottleneck_ci,
+            "avg_util_mean": avg_util_mean,
+            "avg_util_ci95": avg_util_ci,
+            "node_count_mean": node_count_mean,
+            "node_count_ci95": node_count_ci,
+            "num_constrs_mean": num_constrs_mean,
+            "num_constrs_ci95": num_constrs_ci,
+            "num_vars_mean": num_vars_mean,
+            "num_vars_ci95": num_vars_ci,
         })
     return rows
 

@@ -142,6 +142,10 @@ uv run python -m src.eval.aggregate_partials \
 echo "==> [5/5] Plotting -> $FIGURES_DIR"
 uv run python -m src.eval.graficos \
     --summary-csv "$SUMMARY_CSV" \
-    --out-dir "$FIGURES_DIR"
+    --topology-label "$TOPOLOGY" \
+    --out-dir "$FIGURES_DIR" \
+    --x-col M \
+    --x-label "M (reroute penalty weight)" \
+    --series-col graph_type
 
 echo "Done. Summary: $SUMMARY_CSV -- Figures: $FIGURES_DIR"

@@ -1,30 +1,43 @@
 """
-Turns results/aggregated/summary.csv (see aggregate_partials.py) into a
-fixed set of PNG charts under results/figures/:
 
-  - tradeoff.png       makespan and reroute count vs the reroute-penalty
-                        weight M, one color per graph_type/topology.
-                        (Two scenarios can share graph_type+M but differ in
-                        Hmax -- different upgrade-type draws per seed give
-                        a different worst-case Hmax -- so points are
-                        plotted individually rather than connected as a
-                        line.)
-  - scalability.png    solve runtime vs Hmax (log-scale y), one color per
-                        graph_type/topology -- how the model's difficulty
-                        grows with the size of the time horizon.
-  - diagnostics.png    feasible_rate and mean MIP gap per topology, as a
-                        sanity check that the sweep actually solved cleanly.
+Two chart families, rendered from any summary CSV that has the right
+columns (results/aggregated/congestion_<topology>.csv from
+congestion_sweep.py, or results/aggregated/summary.csv from
+aggregate_partials.py -- both now carry u_fraction/n_commodities/model-size
+columns):
+
+  - network_load_<label>.png   bottleneck/average link utilization
+                                (_network_load in milp_makespan.py) and MILP
+                                feasibility rate, vs --x-col (default:
+                                n_commodities), one color per --series-col
+                                value (default: u_fraction).
+  - solver_<label>.png         solve runtime (log scale), MIP optimality
+                                gap, and model size (constraint count),
+                                against the same --x-col/--series-col axes.
+
+Each chart is only rendered if its required columns are present and carry
+at least one non-NaN value, so pointing this at an older summary.csv (before
+u_fraction/model-size columns existed) just skips gracefully.
 
 Usage:
+    # congestion sweep (results/aggregated/congestion_<topology>.csv):
+    # x=n_commodities, one series per u_fraction (both charts apply)
+    python -m src.eval.graficos --summary-csv results/aggregated/congestion_dt12.csv \
+        --topology-label dt12 --out-dir results/figures
+
+    # run_pipeline.sh's M-sweep summary (results/aggregated/summary.csv):
+    # x=M, one series per topology (graph_type)
     python -m src.eval.graficos --summary-csv results/aggregated/summary.csv \
-        --out-dir results/figures
+        --topology-label all --out-dir results/figures \
+        --x-col M --x-label "M (reroute penalty weight)" --series-col graph_type
 """
 from __future__ import annotations
 
 import argparse
 import csv
+import math
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import matplotlib
 
@@ -41,9 +54,10 @@ INK_MUTED = "#898781"
 GRIDLINE = "#e1e0d9"
 BASELINE = "#c3c2b7"
 SURFACE = "#fcfcfb"
-STATUS_GOOD = "#0ca30c"
-STATUS_WARNING = "#fab219"
-STATUS_CRITICAL = "#d03b3b"
+
+# Columns that identify an instance / a scenario rather than holding a
+# numeric measurement -- left as strings by load_summary().
+_NON_NUMERIC_COLS = {"graph_type", "instance_names"}
 
 plt.rcParams.update({
     "figure.facecolor": SURFACE,
@@ -68,7 +82,7 @@ def load_summary(path: str) -> List[dict]:
         rows = list(csv.DictReader(f))
     for r in rows:
         for k, v in list(r.items()):
-            if k == "graph_type":
+            if k in _NON_NUMERIC_COLS:
                 continue
             try:
                 r[k] = float(v)
@@ -90,14 +104,6 @@ def _seed_label(instance_names: str) -> str:
     return ",".join(seeds)
 
 
-def _topology_colors(rows: List[dict]) -> Dict[str, str]:
-    topologies = sorted({r["graph_type"] for r in rows})
-    if len(topologies) > len(CATEGORICAL):
-        print(f"[warn] {len(topologies)} topologies but only {len(CATEGORICAL)} "
-              f"categorical slots defined; extra ones will repeat colors.")
-    return {t: CATEGORICAL[i % len(CATEGORICAL)] for i, t in enumerate(topologies)}
-
-
 def _style_axis(ax, title: str, xlabel: str, ylabel: str):
     ax.set_title(title, loc="left", pad=10)
     ax.set_xlabel(xlabel)
@@ -111,133 +117,177 @@ def _style_axis(ax, title: str, xlabel: str, ylabel: str):
         ax.spines[spine].set_linewidth(1.0)
 
 
-def plot_tradeoff(rows: List[dict], colors: Dict[str, str], out_dir: Path):
-    feasible = [r for r in rows if r["feasible_rate"] > 0]
-    if not feasible:
-        print("[skip] tradeoff.png: no feasible scenarios")
+def _is_nan(v) -> bool:
+    return isinstance(v, float) and math.isnan(v)
+
+
+def _series_colors(rows: List[dict], series_col: str) -> Dict[object, str]:
+    values = sorted({r[series_col] for r in rows if series_col in r})
+    if len(values) > len(CATEGORICAL):
+        print(f"[warn] {len(values)} distinct {series_col!r} values but only {len(CATEGORICAL)} "
+              f"categorical slots defined; extra ones will repeat colors.")
+    return {v: CATEGORICAL[i % len(CATEGORICAL)] for i, v in enumerate(values)}
+
+
+def _series_label(series_col: str, value) -> str:
+    if isinstance(value, float):
+        return f"{series_col}={value:g}"
+    return str(value)
+
+
+def _has_data(rows: List[dict], col: str) -> bool:
+    return any(not _is_nan(r.get(col)) and r.get(col) is not None for r in rows)
+
+
+def plot_network_load(
+    rows: List[dict], out_dir: Path, topology_label: str,
+    x_col: str = "n_commodities", x_label: Optional[str] = None, series_col: str = "u_fraction",
+):
+    x_label = x_label or x_col
+    rows = [r for r in rows if x_col in r and series_col in r]
+    rows = sorted(rows, key=lambda r: (r[series_col], r[x_col]))
+    if not rows or not _has_data(rows, "bottleneck_util_mean"):
+        print(f"[skip] network_load_{topology_label}.png: no bottleneck_util_mean data in CSV")
         return
 
-    fig, axes = plt.subplots(1, 2, figsize=(11, 4.5))
-    seen_labels = set()
+    series_vals = sorted({r[series_col] for r in rows})
+    colors = _series_colors(rows, series_col)
 
-    for ax, ycol, ycicol, title, ylabel in (
-        (axes[0], "makespan_mean", "makespan_ci95", "Makespan vs. reroute penalty", "Makespan (weeks)"),
-        (axes[1], "reroutes_mean", "reroutes_ci95", "Reroutes vs. reroute penalty", "Total reroutes"),
-    ):
-        for topo in sorted(colors):
-            pts = [r for r in feasible if r["graph_type"] == topo]
-            if not pts:
-                continue
-            # small horizontal jitter so scenarios that share (topology, M)
-            # but differ in Hmax don't fully overlap
-            n = len(pts)
-            for i, r in enumerate(sorted(pts, key=lambda r: r["M"])):
-                jitter = (i % 3 - 1) * 0.02 * max(r["M"], 1.0)
-                label = topo if topo not in seen_labels else None
-                ax.errorbar(
-                    r["M"] + jitter, r[ycol], yerr=r[ycicol],
-                    fmt="o", markersize=6, capsize=3, linewidth=1.4,
-                    color=colors[topo], ecolor=colors[topo], alpha=0.9,
-                    label=label,
-                )
-                ax.annotate(
-                    _seed_label(r.get("instance_names", "")),
-                    (r["M"] + jitter, r[ycol]), textcoords="offset points",
-                    xytext=(5, 4), fontsize=7, color=INK_MUTED,
-                )
-                if label:
-                    seen_labels.add(topo)
-        _style_axis(ax, title, "M (reroute penalty weight)", ylabel)
-
-    handles, labels = axes[0].get_legend_handles_labels()
-    fig.legend(handles, labels, loc="lower center", ncol=min(len(labels), 6),
-               bbox_to_anchor=(0.5, -0.04))
-    fig.text(0.5, -0.09, "labels = seed (data/instances/<topology>_..._<seed>.json)",
-              ha="center", fontsize=8, color=INK_MUTED)
-    fig.tight_layout(rect=(0, 0.04, 1, 1))
-    out_path = out_dir / "tradeoff.png"
-    fig.savefig(out_path, dpi=150, bbox_inches="tight")
-    plt.close(fig)
-    print(f"Wrote {out_path}")
-
-
-def plot_scalability(rows: List[dict], colors: Dict[str, str], out_dir: Path):
-    feasible = [r for r in rows if r["feasible_rate"] > 0]
-    if not feasible:
-        print("[skip] scalability.png: no feasible scenarios")
-        return
-
-    fig, ax = plt.subplots(figsize=(7, 4.5))
-    for topo in sorted(colors):
-        pts = [r for r in feasible if r["graph_type"] == topo]
-        if not pts:
-            continue
-        xs = [r["Hmax"] for r in pts]
-        ys = [max(r["runtime_mean"], 1e-4) for r in pts]
-        ax.scatter(xs, ys, s=48, color=colors[topo], alpha=0.9, label=topo,
-                   edgecolors=SURFACE, linewidths=0.6)
-        for r, x, y in zip(pts, xs, ys):
-            ax.annotate(
-                _seed_label(r.get("instance_names", "")), (x, y),
-                textcoords="offset points", xytext=(5, 4), fontsize=7, color=INK_MUTED,
-            )
-
-    ax.set_yscale("log")
-    _style_axis(ax, "Solve time vs. time-horizon size", "Hmax (weeks)", "Runtime (s, log scale)")
-    ax.legend(loc="upper left", ncol=1)
-    fig.text(0.5, -0.02, "labels = seed (data/instances/<topology>_..._<seed>.json)",
-              ha="center", fontsize=8, color=INK_MUTED)
-    fig.tight_layout()
-    out_path = out_dir / "scalability.png"
-    fig.savefig(out_path, dpi=150, bbox_inches="tight")
-    plt.close(fig)
-    print(f"Wrote {out_path}")
-
-
-def plot_diagnostics(rows: List[dict], colors: Dict[str, str], out_dir: Path):
-    topologies = sorted(colors)
-    feas_by_topo = {t: [r["feasible_rate"] for r in rows if r["graph_type"] == t] for t in topologies}
-    gap_by_topo = {
-        t: [r["mip_gap_mean"] for r in rows if r["graph_type"] == t and r["feasible_rate"] > 0]
-        for t in topologies
-    }
-
-    fig, axes = plt.subplots(1, 2, figsize=(11, 4.0))
+    fig, axes = plt.subplots(1, 3, figsize=(16, 4.5))
 
     ax = axes[0]
-    worst_feas = [min(feas_by_topo[t]) if feas_by_topo[t] else 0.0 for t in topologies]
-    bar_colors = [STATUS_GOOD if v >= 0.999 else (STATUS_WARNING if v >= 0.5 else STATUS_CRITICAL) for v in worst_feas]
-    bars = ax.bar(topologies, worst_feas, color=bar_colors, width=0.55, zorder=3)
-    for b, v in zip(bars, worst_feas):
-        ax.text(b.get_x() + b.get_width() / 2, v + 0.02, f"{v:.0%}", ha="center",
-                fontsize=9, color=INK_SECONDARY)
-    ax.set_ylim(0, 1.15)
-    _style_axis(ax, "Worst-case feasibility rate", "", "Feasible / solved")
+    for sv in series_vals:
+        pts = [r for r in rows if r[series_col] == sv and r["feasible_rate"] > 0
+               and not _is_nan(r.get("bottleneck_util_mean"))]
+        xs = [r[x_col] for r in pts]
+        ys = [r["bottleneck_util_mean"] for r in pts]
+        yerr = [r["bottleneck_util_ci95"] for r in pts]
+        ax.errorbar(xs, ys, yerr=yerr, fmt="o-", markersize=6, capsize=3, linewidth=1.6,
+                    color=colors[sv], ecolor=colors[sv], alpha=0.9, label=_series_label(series_col, sv))
+    ax.set_ylim(0, 1.05)
+    _style_axis(ax, "Bottleneck utilization", x_label, "Worst (edge, h) utilization")
+    ax.legend(loc="lower right", fontsize=8)
 
     ax = axes[1]
-    mean_gap = [sum(gap_by_topo[t]) / len(gap_by_topo[t]) if gap_by_topo[t] else 0.0 for t in topologies]
-    bar_colors = [STATUS_GOOD if v <= 1e-6 else (STATUS_WARNING if v <= 0.05 else STATUS_CRITICAL) for v in mean_gap]
-    bars = ax.bar(topologies, mean_gap, color=bar_colors, width=0.55, zorder=3)
-    for b, v in zip(bars, mean_gap):
-        ax.text(b.get_x() + b.get_width() / 2, v, f"{v:.1%}", ha="center", va="bottom",
-                fontsize=9, color=INK_SECONDARY)
-    _style_axis(ax, "Mean MIP optimality gap", "", "Gap")
-    ax.set_ylim(bottom=0)  # gap is structurally >= 0; don't let autoscale imply otherwise
+    for sv in series_vals:
+        pts = [r for r in rows if r[series_col] == sv and r["feasible_rate"] > 0
+               and not _is_nan(r.get("avg_util_mean"))]
+        xs = [r[x_col] for r in pts]
+        ys = [r["avg_util_mean"] for r in pts]
+        yerr = [r["avg_util_ci95"] for r in pts]
+        ax.errorbar(xs, ys, yerr=yerr, fmt="o-", markersize=6, capsize=3, linewidth=1.6,
+                    color=colors[sv], ecolor=colors[sv], alpha=0.9, label=_series_label(series_col, sv))
+    ax.set_ylim(bottom=0)
+    _style_axis(ax, "Average utilization", x_label, "Mean over live (edge, h) slots")
+    ax.legend(loc="upper left", fontsize=8)
 
-    for ax in axes:
-        ax.tick_params(axis="x", rotation=20)
+    ax = axes[2]
+    for sv in series_vals:
+        pts = [r for r in rows if r[series_col] == sv]
+        xs = [r[x_col] for r in pts]
+        ys = [r["feasible_rate"] for r in pts]
+        ax.plot(xs, ys, "o-", markersize=6, linewidth=1.6, color=colors[sv], alpha=0.9,
+                label=_series_label(series_col, sv))
+    ax.set_ylim(-0.05, 1.1)
+    _style_axis(ax, "MILP feasibility rate", x_label, "Fraction solved feasibly within time limit")
+    ax.legend(loc="lower left", fontsize=8)
 
-    fig.tight_layout()
-    out_path = out_dir / "diagnostics.png"
+    fig.suptitle(f"Network load: {topology_label} ({x_col} x {series_col})",
+                 fontsize=13, fontweight="bold", x=0.02, ha="left")
+    fig.text(0.5, -0.04,
+              "A missing point = every seed at that cell failed to even generate (no feasible "
+              "initial routing at h=0) -- the network can't carry that much traffic at all.",
+              ha="center", fontsize=8, color=INK_MUTED)
+    fig.tight_layout(rect=(0, 0.02, 1, 0.92))
+    out_path = out_dir / f"network_load_{topology_label}.png"
+    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"Wrote {out_path}")
+
+
+def plot_solver_metrics(
+    rows: List[dict], out_dir: Path, topology_label: str,
+    x_col: str = "n_commodities", x_label: Optional[str] = None, series_col: str = "u_fraction",
+    time_limit_line: Optional[float] = 3600.0,
+):
+    x_label = x_label or x_col
+    rows = [r for r in rows if x_col in r and series_col in r]
+    rows = sorted(rows, key=lambda r: (r[series_col], r[x_col]))
+    if not rows:
+        print(f"[skip] solver_{topology_label}.png: no rows in CSV")
+        return
+
+    series_vals = sorted({r[series_col] for r in rows})
+    colors = _series_colors(rows, series_col)
+    has_model_size = _has_data(rows, "num_constrs_mean")
+
+    fig, axes = plt.subplots(1, 3 if has_model_size else 2, figsize=(16, 4.5) if has_model_size else (11, 4.5))
+
+    ax = axes[0]
+    for sv in series_vals:
+        pts = [r for r in rows if r[series_col] == sv and not _is_nan(r.get("runtime_mean"))]
+        xs = [r[x_col] for r in pts]
+        ys = [max(r["runtime_mean"], 1e-2) for r in pts]
+        yerr = [r["runtime_ci95"] for r in pts]
+        ax.errorbar(xs, ys, yerr=yerr, fmt="o-", markersize=6, capsize=3, linewidth=1.6,
+                    color=colors[sv], ecolor=colors[sv], alpha=0.9, label=_series_label(series_col, sv))
+    ax.set_yscale("log")
+    if time_limit_line:
+        ax.axhline(time_limit_line, color=INK_MUTED, linestyle="--", linewidth=1, alpha=0.6)
+        ax.text(rows[0][x_col], time_limit_line, " time limit", fontsize=7, color=INK_MUTED, va="bottom")
+    _style_axis(ax, "Solve time", x_label, "Runtime (s, log)")
+    ax.legend(loc="upper left", fontsize=8)
+
+    ax = axes[1]
+    for sv in series_vals:
+        pts = [r for r in rows if r[series_col] == sv and r["feasible_rate"] > 0
+               and not _is_nan(r.get("mip_gap_mean"))]
+        xs = [r[x_col] for r in pts]
+        ys = [r["mip_gap_mean"] for r in pts]
+        yerr = [r["mip_gap_ci95"] for r in pts]
+        ax.errorbar(xs, ys, yerr=yerr, fmt="o-", markersize=6, capsize=3, linewidth=1.6,
+                    color=colors[sv], ecolor=colors[sv], alpha=0.9, label=_series_label(series_col, sv))
+    ax.set_ylim(bottom=-0.02)
+    _style_axis(ax, "MIP gap (feasible only)", x_label, "Optimality gap")
+    ax.legend(loc="upper left", fontsize=8)
+
+    if has_model_size:
+        ax = axes[2]
+        for sv in series_vals:
+            pts = [r for r in rows if r[series_col] == sv and not _is_nan(r.get("num_constrs_mean"))]
+            xs = [r[x_col] for r in pts]
+            ys = [r["num_constrs_mean"] for r in pts]
+            yerr = [r["num_constrs_ci95"] for r in pts]
+            ax.errorbar(xs, ys, yerr=yerr, fmt="o-", markersize=6, capsize=3, linewidth=1.6,
+                        color=colors[sv], ecolor=colors[sv], alpha=0.9, label=_series_label(series_col, sv))
+        _style_axis(ax, "Model size", x_label, "Number of constraints")
+        ax.legend(loc="upper left", fontsize=8)
+
+    fig.suptitle(f"Solver metrics: {topology_label} ({x_col} x {series_col})",
+                 fontsize=13, fontweight="bold", x=0.02, ha="left")
+    fig.tight_layout(rect=(0, 0, 1, 0.92))
+    out_path = out_dir / f"solver_{topology_label}.png"
     fig.savefig(out_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
     print(f"Wrote {out_path}")
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Render charts from a summary CSV")
-    parser.add_argument("--summary-csv", type=str, default="results/aggregated/summary.csv")
+    parser = argparse.ArgumentParser(
+        description="Render network-load and solver-diagnostic charts from a summary CSV")
+    parser.add_argument("--summary-csv", type=str, required=True)
+    parser.add_argument("--topology-label", type=str, required=True,
+                         help="used in the title and output filenames, e.g. 'dt12' or 'all'")
     parser.add_argument("--out-dir", type=str, default="results/figures")
+    parser.add_argument("--x-col", type=str, default="n_commodities",
+                         help="numeric column for the x-axis (default: n_commodities)")
+    parser.add_argument("--x-label", type=str, default=None,
+                         help="axis label for --x-col (default: the column name)")
+    parser.add_argument("--series-col", type=str, default="u_fraction",
+                         help="column used to color/split series (default: u_fraction)")
+    parser.add_argument("--time-limit-line", type=float, default=3600.0,
+                         help="draw a dashed reference line at this runtime (s) on the solver-time "
+                              "panel; pass 0 to disable")
     args = parser.parse_args()
 
     rows = load_summary(args.summary_csv)
@@ -247,11 +297,12 @@ def main():
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    colors = _topology_colors(rows)
 
-    plot_tradeoff(rows, colors, out_dir)
-    plot_scalability(rows, colors, out_dir)
-    plot_diagnostics(rows, colors, out_dir)
+    plot_network_load(rows, out_dir, args.topology_label,
+                       x_col=args.x_col, x_label=args.x_label, series_col=args.series_col)
+    plot_solver_metrics(rows, out_dir, args.topology_label,
+                         x_col=args.x_col, x_label=args.x_label, series_col=args.series_col,
+                         time_limit_line=args.time_limit_line or None)
 
 
 if __name__ == "__main__":

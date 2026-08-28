@@ -36,14 +36,21 @@ def _is_connected(n_nodes: int, edges: List[Tuple[int, int, int]]) -> bool:
     return len(seen) == n_nodes
 
 
-def gen_erdos_renyi(n_nodes: int, edge_prob: float, rng: random.Random) -> List[Tuple[int, int, int]]:
-    """Random spanning tree (guarantees connectivity) + extra random edges."""
+def gen_erdos_renyi(
+    n_nodes: int, edge_prob: float, rng: random.Random, target_edges: int | None = None,
+) -> List[Tuple[int, int, int]]:
+    """Random spanning tree (guarantees connectivity) + extra random edges.
+
+    If `target_edges` is given, ignore `edge_prob` and instead add random
+    extra edges (on top of the n_nodes-1 spanning-tree edges) until exactly
+    `target_edges` total edges are reached (or all possible pairs are used
+    up) 
+    """
     nodes = list(range(n_nodes))
     rng.shuffle(nodes)
     pairs = set()
     edges: List[Tuple[int, int, int]] = []
     eid = 0
-    # random spanning tree: attach node i to a random earlier node
     for i in range(1, n_nodes):
         j = nodes[rng.randrange(i)]
         u, v = nodes[i], j
@@ -51,6 +58,16 @@ def gen_erdos_renyi(n_nodes: int, edge_prob: float, rng: random.Random) -> List[
         pairs.add((a, b))
         edges.append((a, b, eid))
         eid += 1
+
+    if target_edges is not None:
+        remaining = [(i, j) for i in range(n_nodes) for j in range(i + 1, n_nodes) if (i, j) not in pairs]
+        rng.shuffle(remaining)
+        need = max(0, target_edges - len(edges))
+        for (i, j) in remaining[:need]:
+            pairs.add((i, j))
+            edges.append((i, j, eid))
+            eid += 1
+        return edges
 
     for i in range(n_nodes):
         for j in range(i + 1, n_nodes):
@@ -93,9 +110,12 @@ def gen_grid(n_nodes: int, rng: random.Random) -> Tuple[int, List[Tuple[int, int
     return actual_n, edges
 
 
-def build_graph(graph_type: str, n_nodes: int, edge_prob: float, rng: random.Random):
+def build_graph(
+    graph_type: str, n_nodes: int, edge_prob: float, rng: random.Random,
+    target_edges: int | None = None,
+):
     if graph_type == "erdos_renyi":
-        edges = gen_erdos_renyi(n_nodes, edge_prob, rng)
+        edges = gen_erdos_renyi(n_nodes, edge_prob, rng, target_edges=target_edges)
         return n_nodes, edges
     elif graph_type == "ring":
         edges = gen_ring(n_nodes, rng)
@@ -112,6 +132,7 @@ def generate_instance(
     edge_prob: float = params.DEFAULT_EDGE_PROB,
     u_fraction: float = params.DEFAULT_U_FRACTION,
     n_commodities: int = params.DEFAULT_N_COMMODITIES,
+    target_edges: int | None = None,
     demand_range: Tuple[float, float] = params.DEFAULT_DEMAND_RANGE,
     l_range: Tuple[int, int] = params.DEFAULT_L_RANGE,
     u0_range: Tuple[float, float] = params.DEFAULT_U0_RANGE,
@@ -121,16 +142,19 @@ def generate_instance(
     hmax_override: int | None = None,
     m_weight: float | None = None,
     max_attempts: int = 25,
+    real_capacity_params: bool = False,
 ) -> Instance:
     """Generate one instance. Retries with a perturbed seed (same knobs) up
     to max_attempts times if the graph is disconnected or no feasible joint
-    initial routing is found."""
+    initial routing is found.
+
+    """
     last_err = None
     for attempt in range(max_attempts):
         trial_seed = seed + attempt * 7919  # large prime stride to decorrelate retries
         rng = random.Random(trial_seed)
 
-        actual_n, edges = build_graph(graph_type, n_nodes, edge_prob, rng)
+        actual_n, edges = build_graph(graph_type, n_nodes, edge_prob, rng, target_edges=target_edges)
         if not _is_connected(actual_n, edges):
             last_err = "disconnected graph"
             continue
@@ -144,15 +168,23 @@ def generate_instance(
 
         u0, u1, L = {}, {}, {}
         u_fixed = {}
+        upgrade_types = {}
         for eid in all_eids:
             if eid in U_set:
-                u0_val = rng.uniform(*u0_range)
-                factor = rng.uniform(*upgrade_factor_range)
-                u0[eid] = u0_val
-                u1[eid] = u0_val * factor
-                L[eid] = rng.randint(*l_range)
+                if real_capacity_params:
+                    utype = rng.choice(params.UPGRADE_TYPES)
+                    upgrade_types[eid] = utype
+                    u0[eid] = params.BASE_CHANNEL_CAPACITY
+                    u1[eid] = params.BASE_CHANNEL_CAPACITY * params.UPGRADE_CAPACITY_MULTIPLIER[utype]
+                    L[eid] = max(1, -(-params.UPGRADE_DURATION_DAYS[utype] // params.TIME_UNIT_DAYS))
+                else:
+                    u0_val = rng.uniform(*u0_range)
+                    factor = rng.uniform(*upgrade_factor_range)
+                    u0[eid] = u0_val
+                    u1[eid] = u0_val * factor
+                    L[eid] = rng.randint(*l_range)
             else:
-                u_fixed[eid] = rng.uniform(*fixed_cap_range)
+                u_fixed[eid] = params.BASE_CHANNEL_CAPACITY if real_capacity_params else rng.uniform(*fixed_cap_range)
 
         commodities = []
         for _ in range(n_commodities):
@@ -196,6 +228,7 @@ def generate_instance(
             Hmax=hmax,
             M=M,
             initial_routing=routing,
+            upgrade_types=upgrade_types,
         )
 
     raise RuntimeError(
@@ -210,6 +243,8 @@ def main():
     parser.add_argument("--graph-type", choices=["erdos_renyi", "ring", "grid"], default=params.DEFAULT_GRAPH_TYPE)
     parser.add_argument("--n-nodes", type=int, default=params.DEFAULT_N_NODES)
     parser.add_argument("--edge-prob", type=float, default=params.DEFAULT_EDGE_PROB)
+    parser.add_argument("--n-edges", type=int, default=None,
+                         help="erdos_renyi only: pin |E| to this exact count instead of edge_prob")
     parser.add_argument("--u-fraction", type=float, default=params.DEFAULT_U_FRACTION)
     parser.add_argument("--n-commodities", type=int, default=params.DEFAULT_N_COMMODITIES)
     parser.add_argument("--demand-min", type=float, default=params.DEFAULT_DEMAND_RANGE[0])
@@ -220,6 +255,10 @@ def main():
     parser.add_argument("--m-weight", type=float, default=None, help="Override M_DEFAULT")
     parser.add_argument("--seed", type=int, default=params.DEFAULT_SEED)
     parser.add_argument("--count", type=int, default=1, help="Generate `count` instances with seeds seed..seed+count-1")
+    parser.add_argument("--real-capacity-params", action="store_true",
+                         help="use BASE_CHANNEL_CAPACITY + UPGRADE_TYPES for u0/u_fixed/u1/L "
+                              "instead of the u0-range/fixed-cap-range/upgrade-factor-range/l-range "
+                              "knobs, matching real_instance_generator.py exactly")
     parser.add_argument("--out-dir", type=str, default=str(DEFAULT_OUT_DIR))
     args = parser.parse_args()
 
@@ -230,6 +269,8 @@ def main():
             graph_type=args.graph_type,
             n_nodes=args.n_nodes,
             edge_prob=args.edge_prob,
+            target_edges=args.n_edges,
+            real_capacity_params=args.real_capacity_params,
             u_fraction=args.u_fraction,
             n_commodities=args.n_commodities,
             demand_range=(args.demand_min, args.demand_max),
