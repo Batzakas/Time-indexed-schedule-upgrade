@@ -32,7 +32,7 @@ python -m src.eval.aggregate_partials --partial-dir results/partial_results \
 
 ```bash
 python -m src.data.real_instance_generator --topology dt12 \
-    --u-fraction 0.3 --n-commodities 5 --seed 0 --count 5 --out-dir data/instances
+    --u-fraction 0.5 --n-commodities 10 --seed 0 --count 5 --out-dir data/instances
 
 python -m src.core.runner --instances "data/instances/dt12_real_*.json" \
     --m-values 0.5 1.0 2.0 --parallel 4 --gurobi-license gurobi.lic
@@ -64,21 +64,21 @@ re-launches `model_tester.py` via `sys.executable`, so the same interpreter
 
 ```text
 batch_milp/
-├── gurobi.lic                  #copied from PWOF-Fronthaul-Optimization-hpc
+├── gurobi.lic
 ├── src/
-│   ├── configs/params.py       # solver + generator defaults
-│   ├── data/instance_generator.py   # synthetic instance generator (CLI)
-│   ├── data/real_instance_generator.py  # real-topology instance generator (CLI)
-│   ├── data/topology_loader.py      # parses src/data/topologies/*.txt (test5, dt12)
+│   ├── configs/params.py
+│   ├── data/instance_generator.py
+│   ├── data/real_instance_generator.py
+│   ├── data/topology_loader.py
 │   ├── core/
-│   │   ├── instance.py         # instance schema, JSON I/O, initial-routing solver
-│   │   ├── model_tester.py     # single-instance CLI worker (writes 1 partial JSON, resumable)
-│   │   └── runner.py           # parallel dispatcher over instances x M values
-│   ├── algorithms/milp_makespan.py  # the Gurobi model (run_ilp / solve_ilp)
+│   │   ├── instance.py
+│   │   ├── model_tester.py
+│   │   └── runner.py
+│   ├── algorithms/milp_makespan.py
 │   └── eval/
-│       ├── aggregate_partials.py    # merges partials -> results/aggregated/summary.csv
-│       ├── congestion_sweep.py      # u_fraction x n_commodities sweep -> congestion_<topology>.csv
-│       └── graficos.py              # summary/congestion csv -> results/figures/{network_load,solver}_<label>.png
+│       ├── aggregate_partials.py
+│       ├── congestion_sweep.py
+│       └── graficos.py
 └── results/
     ├── partial_results/<graph_type>_<n_nodes>_<u_pct>/partial_<name>_M<M>_H<Hmax>.json
     ├── aggregated/{summary.csv,congestion_<topology>.csv}
