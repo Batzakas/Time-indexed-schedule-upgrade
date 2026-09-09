@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Tuple
 
 import src.configs.params as params
-from src.core.instance import Commodity, Instance, compute_initial_routing, save
+from src.core.instance import Commodity, Instance, compute_initial_routing, edges_used_by_commodities, save
 from src.data.topology_loader import load_topology
 
 DEFAULT_OUT_DIR = Path(__file__).resolve().parent / "instances"
@@ -56,9 +56,31 @@ def generate_real_instance(
         trial_seed = seed + attempt * 7919
         rng = random.Random(trial_seed)
 
+        commodities = []
+        for _ in range(n_commodities):
+            s, t = rng.sample(range(n_nodes), 2)
+            d = rng.uniform(*demand_range)
+            commodities.append(Commodity(s=s, t=t, d=d))
+
+        # probe routing (every edge at BASE_CHANNEL_CAPACITY, same as both
+        # u0 and u_fixed below -- capacity doesn't actually depend on U here)
+        # just to see which edges carry a commodity; U is sampled only from
+        # that subset instead of uniformly over every edge in the topology
+        probe_cap = {eid: params.BASE_CHANNEL_CAPACITY for eid in all_eids}
+        used_eids = edges_used_by_commodities(n_nodes, edges, probe_cap, commodities, rng)
+        if used_eids is None:
+            last_err = "no feasible joint initial routing (probe)"
+            continue
+
         u_count = max(1, round(u_fraction * n_edges)) if n_edges > 0 else 0
         u_count = min(u_count, n_edges)
-        U = sorted(rng.sample(all_eids, u_count)) if u_count > 0 else []
+        candidates = sorted(used_eids)
+        if u_count > len(candidates):
+            print(f"[warn] only {len(candidates)} edge(s) carry a commodity in the probe routing, "
+                  f"below the requested u_count={u_count} (u_fraction={u_fraction:g}); capping U "
+                  f"to those {len(candidates)} edge(s).")
+            u_count = len(candidates)
+        U = sorted(rng.sample(candidates, u_count)) if u_count > 0 else []
         U_set = set(U)
 
         u0, u1, L, upgrade_types = {}, {}, {}, {}
@@ -72,12 +94,6 @@ def generate_real_instance(
                 L[eid] = max(1, ceil(params.UPGRADE_DURATION_DAYS[utype] / params.TIME_UNIT_DAYS))
             else:
                 u_fixed[eid] = params.BASE_CHANNEL_CAPACITY
-
-        commodities = []
-        for _ in range(n_commodities):
-            s, t = rng.sample(range(n_nodes), 2)
-            d = rng.uniform(*demand_range)
-            commodities.append(Commodity(s=s, t=t, d=d))
 
         routing = compute_initial_routing(
             n_nodes=n_nodes,

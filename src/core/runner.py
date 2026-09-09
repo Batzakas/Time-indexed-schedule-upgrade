@@ -29,7 +29,6 @@ def build_model_tester_cmd(
     M: Optional[float],
     hmax: Optional[int],
     time_limit: float,
-    max_memory: Optional[float],
     gurobi_license: Optional[str],
     out_dir: str,
     need_checkpoint: bool,
@@ -40,8 +39,6 @@ def build_model_tester_cmd(
     if hmax is not None:
         cmd += ["--hmax", str(hmax)]
     cmd += ["--time-limit", str(time_limit)]
-    if max_memory is not None:
-        cmd += ["--max-memory", str(max_memory)]
     if gurobi_license is not None:
         cmd += ["--gurobi-license", gurobi_license]
     cmd += ["--out-dir", out_dir]
@@ -50,11 +47,11 @@ def build_model_tester_cmd(
 
 
 def _run_one(args_tuple) -> dict:
-    (instance_path, M, hmax, time_limit, max_memory, gurobi_license,
+    (instance_path, M, hmax, time_limit, gurobi_license,
      out_dir, need_checkpoint) = args_tuple
 
     cmd = build_model_tester_cmd(
-        instance_path, M, hmax, time_limit, max_memory, gurobi_license,
+        instance_path, M, hmax, time_limit, gurobi_license,
         out_dir, need_checkpoint,
     )
 
@@ -76,14 +73,13 @@ def runner(
     m_values: List[Optional[float]],
     hmax: Optional[int] = None,
     time_limit: float = 7200.0,
-    max_memory: Optional[float] = None,
     gurobi_license: Optional[str] = "gurobi.lic",
     out_dir: str = "results/partial_results",
     need_checkpoint: bool = True,
     parallel: Optional[int] = None,
 ):
     tasks = [
-        (inst, M, hmax, time_limit, max_memory, gurobi_license, out_dir, need_checkpoint)
+        (inst, M, hmax, time_limit, gurobi_license, out_dir, need_checkpoint)
         for inst in instances
         for M in m_values
     ]
@@ -115,7 +111,6 @@ def main():
                          help="Rerouting-penalty weights to sweep (default: use each instance's own M)")
     parser.add_argument("--hmax", type=int, default=None)
     parser.add_argument("--time-limit", type=float, default=7200.0)
-    parser.add_argument("--max-memory", type=float, default=None)
     parser.add_argument("--gurobi-license", type=str, default="gurobi.lic")
     parser.add_argument("--out-dir", type=str, default="results/partial_results")
     parser.add_argument("--need-checkpoint", type=int, choices=[0, 1], default=1)
@@ -132,7 +127,6 @@ def main():
         m_values=args.m_values,
         hmax=args.hmax,
         time_limit=args.time_limit,
-        max_memory=args.max_memory,
         gurobi_license=args.gurobi_license,
         out_dir=args.out_dir,
         need_checkpoint=bool(args.need_checkpoint),

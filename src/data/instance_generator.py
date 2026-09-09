@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import List, Tuple
 
 import src.configs.params as params
-from src.core.instance import Commodity, Instance, compute_initial_routing, save
+from src.core.instance import Commodity, Instance, compute_initial_routing, edges_used_by_commodities, save
 
 DEFAULT_OUT_DIR = Path(__file__).resolve().parent / "instances"
 
@@ -160,10 +160,32 @@ def generate_instance(
             continue
 
         n_edges = len(edges)
+        all_eids = [eid for (_, _, eid) in edges]
+
+        commodities = []
+        for _ in range(n_commodities):
+            s, t = rng.sample(range(actual_n), 2)
+            d = rng.uniform(*demand_range)
+            commodities.append(Commodity(s=s, t=t, d=d))
+
+        probe_cap = {
+            eid: (params.BASE_CHANNEL_CAPACITY if real_capacity_params else rng.uniform(*fixed_cap_range))
+            for eid in all_eids
+        }
+        used_eids = edges_used_by_commodities(actual_n, edges, probe_cap, commodities, rng)
+        if used_eids is None:
+            last_err = "no feasible joint initial routing (probe)"
+            continue
+
         u_count = max(1, round(u_fraction * n_edges)) if n_edges > 0 else 0
         u_count = min(u_count, n_edges)
-        all_eids = [eid for (_, _, eid) in edges]
-        U = sorted(rng.sample(all_eids, u_count)) if u_count > 0 else []
+        candidates = sorted(used_eids)
+        if u_count > len(candidates):
+            print(f"[warn] only {len(candidates)} edge(s) carry a commodity in the probe routing, "
+                  f"below the requested u_count={u_count} (u_fraction={u_fraction:g}); capping U "
+                  f"to those {len(candidates)} edge(s).")
+            u_count = len(candidates)
+        U = sorted(rng.sample(candidates, u_count)) if u_count > 0 else []
         U_set = set(U)
 
         u0, u1, L = {}, {}, {}
@@ -184,13 +206,7 @@ def generate_instance(
                     u1[eid] = u0_val * factor
                     L[eid] = rng.randint(*l_range)
             else:
-                u_fixed[eid] = params.BASE_CHANNEL_CAPACITY if real_capacity_params else rng.uniform(*fixed_cap_range)
-
-        commodities = []
-        for _ in range(n_commodities):
-            s, t = rng.sample(range(actual_n), 2)
-            d = rng.uniform(*demand_range)
-            commodities.append(Commodity(s=s, t=t, d=d))
+                u_fixed[eid] = probe_cap[eid]
 
         routing = compute_initial_routing(
             n_nodes=actual_n,

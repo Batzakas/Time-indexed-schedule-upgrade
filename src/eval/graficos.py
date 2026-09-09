@@ -236,7 +236,7 @@ def plot_solver_metrics(
         ax.axhline(time_limit_line, color=INK_MUTED, linestyle="--", linewidth=1, alpha=0.6)
         ax.text(rows[0][x_col], time_limit_line, " time limit", fontsize=7, color=INK_MUTED, va="bottom")
     _style_axis(ax, "Solve time", x_label, "Runtime (s, log)")
-    ax.legend(loc="upper left", fontsize=8)
+    ax.legend(loc="lower right", fontsize=8)
 
     ax = axes[1]
     for sv in series_vals:

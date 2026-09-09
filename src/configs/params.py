@@ -4,9 +4,8 @@ Flat module of constants, overridable per-run via CLI flags in
 core/model_tester.py or src/data/instance_generator.py.
 """
 
-TIME_LIMIT = 2 * 60 * 60          
-MIP_GAP = None                  
-DEFAULT_MAX_MEMORY = None         
+TIME_LIMIT = 2 * 60 * 60
+MIP_GAP = None
 DEFAULT_GUROBI_LICENSE = "gurobi.lic"
 
 M_DEFAULT = 1.0                  

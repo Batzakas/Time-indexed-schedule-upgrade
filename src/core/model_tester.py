@@ -14,6 +14,8 @@ import time
 from pathlib import Path
 from typing import Any, Optional
 
+from gurobipy import GRB
+
 import src.configs.params as params
 from src.algorithms.milp_makespan import run_ilp
 from src.core.instance import load
@@ -41,7 +43,6 @@ def solve_one(
     M: Optional[float] = None,
     hmax: Optional[int] = None,
     time_limit: float = params.TIME_LIMIT,
-    max_memory: Optional[float] = None,
     gurobi_license: Optional[str] = None,
     mip_gap: Optional[float] = None,
     out_dir: Path = DEFAULT_PARTIAL_DIR,
@@ -62,7 +63,6 @@ def solve_one(
         M=M,
         Hmax=hmax,
         time_limit=time_limit,
-        max_memory=max_memory,
         gurobi_license=gurobi_license,
         mip_gap=mip_gap,
     )
@@ -86,7 +86,14 @@ def solve_one(
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(record, f, indent=2)
 
-    status_str = "OPTIMAL" if record.get("feasible") else f"NOT-SOLVED(status={record.get('status')})"
+    if not record.get("feasible"):
+        status_str = f"NOT-SOLVED(status={record.get('status')})"
+    elif record.get("status") == GRB.OPTIMAL:
+        status_str = "OPTIMAL"
+    else:
+        gap = record.get("mip_gap")
+        gap_str = f"{gap:.4f}" if gap is not None else "?"
+        status_str = f"FEASIBLE(status={record.get('status')}, gap={gap_str})"
     print(f"[done] {instance.name} M={eff_M} Hmax={eff_hmax} -> {status_str} -> {out_path}")
     return out_path
 
@@ -97,7 +104,6 @@ def main():
     parser.add_argument("--M", type=float, default=None, help="Override instance.M")
     parser.add_argument("--hmax", type=int, default=None, help="Override instance.Hmax")
     parser.add_argument("--time-limit", type=float, default=params.TIME_LIMIT)
-    parser.add_argument("--max-memory", type=float, default=params.DEFAULT_MAX_MEMORY)
     parser.add_argument("--mip-gap", type=float, default=params.MIP_GAP)
     parser.add_argument("--gurobi-license", type=str, default=params.DEFAULT_GUROBI_LICENSE)
     parser.add_argument("--out-dir", type=str, default=str(DEFAULT_PARTIAL_DIR))
@@ -109,7 +115,6 @@ def main():
         M=args.M,
         hmax=args.hmax,
         time_limit=args.time_limit,
-        max_memory=args.max_memory,
         gurobi_license=args.gurobi_license,
         mip_gap=args.mip_gap,
         out_dir=Path(args.out_dir),

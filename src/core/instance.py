@@ -187,3 +187,24 @@ def compute_initial_routing(
         routing[idx] = chosen
 
     return routing
+
+
+def edges_used_by_commodities(
+    n_nodes: int,
+    edges: List[Tuple[int, int, int]],
+    capacity: Dict[int, float],
+    commodities: List[Commodity],
+    rng: Optional[random.Random] = None,
+    max_path_len: Optional[int] = None,
+) -> Optional[set]:
+    #Probe which edges carry at least one commodity
+    routing = compute_initial_routing(
+        n_nodes=n_nodes, edges=edges, U=[], u0={}, u_fixed=capacity,
+        commodities=commodities, rng=rng, max_path_len=max_path_len,
+    )
+    if routing is None:
+        return None
+    used: set = set()
+    for path in routing.values():
+        used.update(path)
+    return used

@@ -38,7 +38,6 @@ def run_ilp(
     M: Optional[float] = None,
     Hmax: Optional[int] = None,
     time_limit: float = params.TIME_LIMIT,
-    max_memory: Optional[float] = None,
     gurobi_license: Optional[str] = None,
     mip_gap: Optional[float] = None,
     verbose: bool = False,
@@ -74,8 +73,6 @@ def run_ilp(
             time.sleep(5 * (attempt + 1))
 
     model = gp.Model("batch_upgrade_makespan", env=env)
-    if max_memory is not None:
-        model.setParam("MemLimit", max_memory)
     model.setParam("TimeLimit", time_limit)
     if mip_gap is not None:
         model.setParam("MIPGap", mip_gap)
@@ -279,12 +276,15 @@ def _network_load(model, instance, Hmax, K, f, arcs_of_edge, edge_ids, U_set, st
             if u_val > bottleneck_val:
                 bottleneck_edge, bottleneck_h, bottleneck_val = e, h, u_val
 
+    block_probability = (sum(values) / len(values)) if values else 0.0
+
     return {
         "utilization": utilization,
         "network_load_max": bottleneck_val,
         "network_load_max_edge": bottleneck_edge,
         "network_load_max_h": bottleneck_h,
-        "network_load_mean": (sum(values) / len(values)) if values else 0.0,
+        "network_load_mean": block_probability,
+        "block_probability": block_probability,
     }
 
 

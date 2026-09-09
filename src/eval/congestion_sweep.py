@@ -87,10 +87,6 @@ def generate_sweep_instances(
                 except RuntimeError:
                     n_fail += 1
                     continue
-                # inst.name (from generate_instance/generate_real_instance) does NOT
-                # encode n_commodities -- at fixed (u_fraction, seed) it collides
-                # across every n_commodities value, silently overwriting earlier
-                # instance/partial files. Must disambiguate here.
                 inst.name = f"cong_{topology}_{inst.name}_k{n_commodities}"
                 path = out_dir / f"{inst.name}.json"
                 save(inst, path)
@@ -101,15 +97,6 @@ def generate_sweep_instances(
     return paths
 
 
-# A solve running under severe memory pressure can fall into OS-level swap
-# thrashing: individual B&B nodes that would normally take milliseconds take
-# minutes, and Gurobi's TimeLimit is only checked between such steps, so the
-# reported runtime can overshoot the requested time_limit by many hours (one
-# dt12 sweep cell had runtime=28755s and 56720s against a 3600s time_limit).
-# That's a measurement artifact of the host running out of RAM, not the
-# solver's actual behavior -- treat any runtime more than ~1.5x the largest
-# sane budget used in this project (3600s) as contaminated and drop it from
-# the mean/CI, same way a NaN/None reading would be dropped.
 _RUNTIME_SANITY_CAP = 5400.0
 
 
@@ -143,12 +130,15 @@ def aggregate_by_scenario(partial_dir: str, u_fraction_candidates: List[float]) 
         gap_mean, gap_ci = col("mip_gap", feasible)
         bottleneck_mean, bottleneck_ci = col("network_load_max")
         avg_util_mean, avg_util_ci = col("network_load_mean")
-        # model-size fields are present on every record regardless of feasibility
+        block_prob_vals = [
+            r["block_probability"] if r.get("block_probability") is not None else r.get("network_load_mean")
+            for r in feasible
+        ]
+        block_prob_vals = [v for v in block_prob_vals if v is not None]
+        block_probability_mean, block_probability_ci = _mean_ci95(block_prob_vals)
         nodecount_mean, nodecount_ci = col("node_count", recs)
         numconstrs_mean, numconstrs_ci = col("num_constrs", recs)
         numvars_mean, numvars_ci = col("num_vars", recs)
-        # obj_bound/work/iter_count were added mid-experiment: only present on a
-        # subset of records (n_samples above still reflects the full group size)
         objbound_mean, objbound_ci = col("obj_bound", recs)
         work_mean, work_ci = col("work", recs)
         itercount_mean, itercount_ci = col("iter_count", recs)
@@ -164,6 +154,7 @@ def aggregate_by_scenario(partial_dir: str, u_fraction_candidates: List[float]) 
             "mip_gap_mean": gap_mean, "mip_gap_ci95": gap_ci,
             "bottleneck_util_mean": bottleneck_mean, "bottleneck_util_ci95": bottleneck_ci,
             "avg_util_mean": avg_util_mean, "avg_util_ci95": avg_util_ci,
+            "block_probability_mean": block_probability_mean, "block_probability_ci95": block_probability_ci,
             "node_count_mean": nodecount_mean, "node_count_ci95": nodecount_ci,
             "num_constrs_mean": numconstrs_mean, "num_constrs_ci95": numconstrs_ci,
             "num_vars_mean": numvars_mean, "num_vars_ci95": numvars_ci,
@@ -203,7 +194,6 @@ def main():
     parser.add_argument("--seed-start", type=int, default=0)
     parser.add_argument("--m-weight", type=float, default=1.0)
     parser.add_argument("--time-limit", type=float, default=45.0)
-    parser.add_argument("--max-memory", type=float, default=2.0)
     parser.add_argument("--parallel", type=int, default=4)
     parser.add_argument("--gurobi-license", type=str, default=params.DEFAULT_GUROBI_LICENSE)
     parser.add_argument("--instances-dir", type=str, default=None)
@@ -232,12 +222,11 @@ def main():
     )
 
     print(f"==> Solving {len(instance_paths)} instances at M={args.m_weight} "
-          f"(parallel={args.parallel}, max_memory={args.max_memory}GB/worker)")
+          f"(parallel={args.parallel})")
     runner(
         instances=instance_paths,
         m_values=[args.m_weight],
         time_limit=args.time_limit,
-        max_memory=args.max_memory,
         gurobi_license=args.gurobi_license,
         out_dir=partial_dir,
         need_checkpoint=bool(args.need_checkpoint),

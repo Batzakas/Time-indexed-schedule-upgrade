@@ -10,11 +10,10 @@ free to vary per seed on purpose, since it's an outcome of the random
 instance, not a knob we're sweeping; u_fraction is recovered per-record from
 n_upgradeable/n_edges rather than needing a schema change).
 
-Each solve gets a Gurobi MemLimit (--max-memory, default 2GB) and --parallel
-defaults to a conservative 4 workers -- an earlier unbounded run (no
-MemLimit, parallel=cpu_count()-1=11) let a single large instance's solve
-balloon past available RAM and got OOM-killed by the kernel, silently taking
-the whole sweep down with it.
+--parallel defaults to a conservative 4 workers -- an earlier unbounded run
+(parallel=cpu_count()-1=11) let a single large instance's solve balloon past
+available RAM and got OOM-killed by the kernel, silently taking the whole
+sweep down with it.
 
 Usage:
     python -m src.eval.scalability_sweep --n-nodes-list 6 8 10 12 16 20 24 \
@@ -181,13 +180,9 @@ def main():
     parser.add_argument("--seed-start", type=int, default=0)
     parser.add_argument("--m-weight", type=float, default=1.0)
     parser.add_argument("--time-limit", type=float, default=180.0)
-    parser.add_argument("--max-memory", type=float, default=2.0,
-                         help="Gurobi MemLimit in GB per solve, to keep a single worker from "
-                              "exhausting RAM (see plan notes: an unbounded solve OOM-killed the "
-                              "whole sweep once already)")
     parser.add_argument("--parallel", type=int, default=4,
-                         help="worker processes; kept low by default so parallel * max_memory "
-                              "stays well under total RAM (default 4 * 2GB = 8GB)")
+                         help="worker processes; kept low by default to avoid a single large "
+                              "instance's solve exhausting RAM and OOM-killing the whole sweep")
     parser.add_argument("--gurobi-license", type=str, default=params.DEFAULT_GUROBI_LICENSE)
     parser.add_argument("--instances-dir", type=str, default=DEFAULT_INSTANCES_DIR)
     parser.add_argument("--partial-dir", type=str, default=DEFAULT_PARTIAL_DIR)
@@ -210,12 +205,11 @@ def main():
     )
 
     print(f"==> Solving {len(instance_paths)} instances at M={args.m_weight} "
-          f"(parallel={args.parallel}, max_memory={args.max_memory}GB/worker)")
+          f"(parallel={args.parallel})")
     runner(
         instances=instance_paths,
         m_values=[args.m_weight],
         time_limit=args.time_limit,
-        max_memory=args.max_memory,
         gurobi_license=args.gurobi_license,
         out_dir=args.partial_dir,
         need_checkpoint=bool(args.need_checkpoint),
