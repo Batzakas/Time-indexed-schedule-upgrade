@@ -19,6 +19,8 @@ import sys
 from pathlib import Path
 from typing import List, Optional, Tuple
 
+import src.configs.params as params
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MODEL_TESTER_MODULE = "src.core.model_tester"
 LOG_DIR = REPO_ROOT / "src" / "logs"
@@ -32,6 +34,8 @@ def build_model_tester_cmd(
     gurobi_license: Optional[str],
     out_dir: str,
     need_checkpoint: bool,
+    threads: Optional[int] = None,
+    mem_limit: Optional[float] = None,
 ) -> List[str]:
     cmd = [sys.executable, "-u", "-m", MODEL_TESTER_MODULE, "--instance", instance_path]
     if M is not None:
@@ -43,16 +47,20 @@ def build_model_tester_cmd(
         cmd += ["--gurobi-license", gurobi_license]
     cmd += ["--out-dir", out_dir]
     cmd += ["--need-checkpoint", "1" if need_checkpoint else "0"]
+    if threads is not None:
+        cmd += ["--threads", str(threads)]
+    if mem_limit is not None:
+        cmd += ["--mem-limit", str(mem_limit)]
     return cmd
 
 
 def _run_one(args_tuple) -> dict:
     (instance_path, M, hmax, time_limit, gurobi_license,
-     out_dir, need_checkpoint) = args_tuple
+     out_dir, need_checkpoint, threads, mem_limit) = args_tuple
 
     cmd = build_model_tester_cmd(
         instance_path, M, hmax, time_limit, gurobi_license,
-        out_dir, need_checkpoint,
+        out_dir, need_checkpoint, threads=threads, mem_limit=mem_limit,
     )
 
     inst_stem = Path(instance_path).stem
@@ -77,15 +85,17 @@ def runner(
     out_dir: str = "results/partial_results",
     need_checkpoint: bool = True,
     parallel: Optional[int] = None,
+    threads: Optional[int] = params.THREADS,
+    mem_limit: Optional[float] = params.MEM_LIMIT,
 ):
     tasks = [
-        (inst, M, hmax, time_limit, gurobi_license, out_dir, need_checkpoint)
+        (inst, M, hmax, time_limit, gurobi_license, out_dir, need_checkpoint, threads, mem_limit)
         for inst in instances
         for M in m_values
     ]
 
     if parallel is None:
-        parallel = max(1, mp.cpu_count() - 1)
+        parallel = params.DEFAULT_PARALLEL
 
     print(f"Launching {len(tasks)} solve tasks with parallel={parallel} ...")
     if not tasks:
@@ -114,7 +124,12 @@ def main():
     parser.add_argument("--gurobi-license", type=str, default="gurobi.lic")
     parser.add_argument("--out-dir", type=str, default="results/partial_results")
     parser.add_argument("--need-checkpoint", type=int, choices=[0, 1], default=1)
-    parser.add_argument("--parallel", type=int, default=None)
+    parser.add_argument("--parallel", type=int, default=None,
+                         help=f"concurrent solves (default: {params.DEFAULT_PARALLEL}, no parallelism)")
+    parser.add_argument("--threads", type=int, default=params.THREADS,
+                         help="Gurobi Threads param (default: %(default)s)")
+    parser.add_argument("--mem-limit", type=float, default=params.MEM_LIMIT,
+                         help="Gurobi MemLimit in GB (default: %(default)s)")
     args = parser.parse_args()
 
     expanded: List[str] = []
@@ -131,6 +146,8 @@ def main():
         out_dir=args.out_dir,
         need_checkpoint=bool(args.need_checkpoint),
         parallel=args.parallel,
+        threads=args.threads,
+        mem_limit=args.mem_limit,
     )
 
 

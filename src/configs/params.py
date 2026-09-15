@@ -8,6 +8,10 @@ TIME_LIMIT = 2 * 60 * 60
 MIP_GAP = None
 DEFAULT_GUROBI_LICENSE = "gurobi.lic"
 
+THREADS = 20            # Gurobi Threads param (None = let Gurobi decide)
+MEM_LIMIT = 32.0         # Gurobi MemLimit in GB (None = no cap)
+DEFAULT_PARALLEL = 1     # concurrent solves in runner()/congestion_sweep.py
+
 M_DEFAULT = 1.0                  
 DEFAULT_GRAPH_TYPE = "erdos_renyi"   # "erdos_renyi" | "ring" | "grid"
 DEFAULT_N_NODES = 8

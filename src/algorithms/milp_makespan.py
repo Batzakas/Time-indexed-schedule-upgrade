@@ -40,6 +40,8 @@ def run_ilp(
     time_limit: float = params.TIME_LIMIT,
     gurobi_license: Optional[str] = None,
     mip_gap: Optional[float] = None,
+    threads: Optional[int] = params.THREADS,
+    mem_limit: Optional[float] = params.MEM_LIMIT,
     verbose: bool = False,
 ) -> dict:
     #Build and solve the makespan MILP for one instance.
@@ -76,6 +78,10 @@ def run_ilp(
     model.setParam("TimeLimit", time_limit)
     if mip_gap is not None:
         model.setParam("MIPGap", mip_gap)
+    if threads is not None:
+        model.setParam("Threads", threads)
+    if mem_limit is not None:
+        model.setParam("MemLimit", mem_limit)
 
     edges = instance.edges
     edge_ids = [eid for (_, _, eid) in edges]
@@ -210,6 +216,11 @@ def run_ilp(
     try:
         model.optimize()
     except gp.GurobiError as exc:
+        error_msg = (
+            "Out of memory"
+            if getattr(exc, "errno", None) == GRB.Error.OUT_OF_MEMORY
+            else str(exc)
+        )
         return {
             "status": None,
             "runtime": None,
@@ -226,7 +237,7 @@ def run_ilp(
             "mem_used": _safe_attr(model, "MemUsed"),
             "max_mem_used": _safe_attr(model, "MaxMemUsed"),
             "feasible": False,
-            "error": str(exc),
+            "error": error_msg,
         }
 
     return _extract_result(

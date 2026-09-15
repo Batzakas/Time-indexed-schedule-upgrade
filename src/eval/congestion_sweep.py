@@ -194,7 +194,11 @@ def main():
     parser.add_argument("--seed-start", type=int, default=0)
     parser.add_argument("--m-weight", type=float, default=1.0)
     parser.add_argument("--time-limit", type=float, default=45.0)
-    parser.add_argument("--parallel", type=int, default=4)
+    parser.add_argument("--parallel", type=int, default=params.DEFAULT_PARALLEL)
+    parser.add_argument("--threads", type=int, default=params.THREADS,
+                         help="Gurobi Threads param (default: %(default)s)")
+    parser.add_argument("--mem-limit", type=float, default=params.MEM_LIMIT,
+                         help="Gurobi MemLimit in GB (default: %(default)s)")
     parser.add_argument("--gurobi-license", type=str, default=params.DEFAULT_GUROBI_LICENSE)
     parser.add_argument("--instances-dir", type=str, default=None)
     parser.add_argument("--partial-dir", type=str, default=None)
@@ -231,6 +235,8 @@ def main():
         out_dir=partial_dir,
         need_checkpoint=bool(args.need_checkpoint),
         parallel=args.parallel,
+        threads=args.threads,
+        mem_limit=args.mem_limit,
     )
 
     print(f"==> Aggregating by (u_fraction, n_commodities) -> {out_csv}")

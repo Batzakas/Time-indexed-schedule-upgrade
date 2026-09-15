@@ -32,8 +32,10 @@ U_FRACTION_LIST="0.2 0.4 0.5 0.7 0.8 1.0"
 N_SEEDS=10
 SEED_START=0
 M_WEIGHT=1.0
-TIME_LIMIT=7200          
-PARALLEL=15             
+TIME_LIMIT=7200
+PARALLEL=1
+THREADS=""
+MEM_LIMIT=""
 GUROBI_LICENSE="gurobi.lic"
 INSTANCES_DIR="data/instances/congestion_dt12"
 PARTIAL_DIR="results/partial_results/congestion_dt12"
@@ -56,7 +58,9 @@ Resource limits:
   --time-limit SECONDS      Gurobi TimeLimit per instance (default: $TIME_LIMIT = 2h)
 
 Execution:
-  --parallel N               worker processes (default: $PARALLEL, capped for a 32-core host)
+  --parallel N               worker processes (default: $PARALLEL, no parallelism)
+  --threads N                Gurobi Threads per solve (default: 20)
+  --mem-limit GB             Gurobi MemLimit per solve, in GB (default: 32)
   --gurobi-license PATH      (default: $GUROBI_LICENSE)
   --instances-dir DIR        (default: $INSTANCES_DIR)
   --partial-dir DIR          (default: $PARTIAL_DIR)
@@ -77,6 +81,8 @@ while [[ $# -gt 0 ]]; do
         --m-weight) M_WEIGHT="$2"; shift 2 ;;
         --time-limit) TIME_LIMIT="$2"; shift 2 ;;
         --parallel) PARALLEL="$2"; shift 2 ;;
+        --threads) THREADS="$2"; shift 2 ;;
+        --mem-limit) MEM_LIMIT="$2"; shift 2 ;;
         --gurobi-license) GUROBI_LICENSE="$2"; shift 2 ;;
         --instances-dir) INSTANCES_DIR="$2"; shift 2 ;;
         --partial-dir) PARTIAL_DIR="$2"; shift 2 ;;
@@ -122,6 +128,12 @@ sweep_args=(
 )
 if [[ -n "$PARALLEL" ]]; then
     sweep_args+=(--parallel "$PARALLEL")
+fi
+if [[ -n "$THREADS" ]]; then
+    sweep_args+=(--threads "$THREADS")
+fi
+if [[ -n "$MEM_LIMIT" ]]; then
+    sweep_args+=(--mem-limit "$MEM_LIMIT")
 fi
 
 uv run python -m src.eval.congestion_sweep "${sweep_args[@]}"

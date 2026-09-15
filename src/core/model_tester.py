@@ -45,6 +45,8 @@ def solve_one(
     time_limit: float = params.TIME_LIMIT,
     gurobi_license: Optional[str] = None,
     mip_gap: Optional[float] = None,
+    threads: Optional[int] = params.THREADS,
+    mem_limit: Optional[float] = params.MEM_LIMIT,
     out_dir: Path = DEFAULT_PARTIAL_DIR,
     need_checkpoint: bool = True,
 ) -> Path:
@@ -65,6 +67,8 @@ def solve_one(
         time_limit=time_limit,
         gurobi_license=gurobi_license,
         mip_gap=mip_gap,
+        threads=threads,
+        mem_limit=mem_limit,
     )
     wall_time = time.time() - t0
 
@@ -78,6 +82,8 @@ def solve_one(
         "n_commodities": len(instance.commodities),
         "M": eff_M,
         "Hmax": eff_hmax,
+        "threads": threads,
+        "mem_limit": mem_limit,
         "wall_time": wall_time,
         **_json_safe(result),
     }
@@ -105,6 +111,10 @@ def main():
     parser.add_argument("--hmax", type=int, default=None, help="Override instance.Hmax")
     parser.add_argument("--time-limit", type=float, default=params.TIME_LIMIT)
     parser.add_argument("--mip-gap", type=float, default=params.MIP_GAP)
+    parser.add_argument("--threads", type=int, default=params.THREADS,
+                         help="Gurobi Threads param (default: %(default)s)")
+    parser.add_argument("--mem-limit", type=float, default=params.MEM_LIMIT,
+                         help="Gurobi MemLimit in GB (default: %(default)s)")
     parser.add_argument("--gurobi-license", type=str, default=params.DEFAULT_GUROBI_LICENSE)
     parser.add_argument("--out-dir", type=str, default=str(DEFAULT_PARTIAL_DIR))
     parser.add_argument("--need-checkpoint", type=int, choices=[0, 1], default=1)
@@ -117,6 +127,8 @@ def main():
         time_limit=args.time_limit,
         gurobi_license=args.gurobi_license,
         mip_gap=args.mip_gap,
+        threads=args.threads,
+        mem_limit=args.mem_limit,
         out_dir=Path(args.out_dir),
         need_checkpoint=bool(args.need_checkpoint),
     )

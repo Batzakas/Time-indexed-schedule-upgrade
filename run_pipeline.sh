@@ -20,6 +20,8 @@ INSTANCES_DIR="data/instances"
 
 M_VALUES="0.5 1.0 2.0 10.0 40.0 100.0 1000.0 100000.0"
 PARALLEL=""
+THREADS=""
+MEM_LIMIT=""
 GUROBI_LICENSE="gurobi.lic"
 PARTIAL_DIR="results/partial_results"
 SUMMARY_CSV="results/aggregated/summary.csv"
@@ -44,7 +46,9 @@ Instance generation:
 
 Solving:
   --m-values "V1 V2 .."  rerouting-penalty weights to sweep (default: "$M_VALUES")
-  --parallel N           worker processes (default: cpu_count - 1)
+  --parallel N           worker processes (default: 1, no parallelism)
+  --threads N            Gurobi Threads per solve (default: 20)
+  --mem-limit GB         Gurobi MemLimit per solve, in GB (default: 32)
   --gurobi-license PATH  (default: $GUROBI_LICENSE)
   --partial-dir DIR      (default: $PARTIAL_DIR)
 
@@ -69,6 +73,8 @@ while [[ $# -gt 0 ]]; do
       --instances-dir) INSTANCES_DIR="$2"; shift 2 ;;
     --m-values) M_VALUES="$2"; shift 2 ;;
       --parallel) PARALLEL="$2"; shift 2 ;;
+      --threads) THREADS="$2"; shift 2 ;;
+      --mem-limit) MEM_LIMIT="$2"; shift 2 ;;
         --gurobi-license) GUROBI_LICENSE="$2"; shift 2 ;;
         --partial-dir) PARTIAL_DIR="$2"; shift 2 ;;
         --summary-csv) SUMMARY_CSV="$2"; shift 2 ;;
@@ -131,6 +137,12 @@ runner_args=(
 )
 if [[ -n "$PARALLEL" ]]; then
     runner_args+=(--parallel "$PARALLEL")
+fi
+if [[ -n "$THREADS" ]]; then
+    runner_args+=(--threads "$THREADS")
+fi
+if [[ -n "$MEM_LIMIT" ]]; then
+    runner_args+=(--mem-limit "$MEM_LIMIT")
 fi
 uv run python -m src.core.runner "${runner_args[@]}"
 
